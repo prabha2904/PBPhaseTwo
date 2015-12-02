@@ -1,0 +1,11 @@
+key,value
+Pacific Time,5913
+London,5218
+Eastern Time,4234
+Central Time,2426
+Amsterdam,1563
+Paris,886
+New Delhi,874
+Athens,770
+Atlantic Time,748
+Quito,723

@@ -1,0 +1,153 @@
+package com.umkc.edu
+
+import java.lang.System._
+import scala.collection.JavaConversions._
+import scala.collection.convert.wrapAll._
+import scala.collection.convert.decorateAll._
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.types.{StructType,StructField,StringType}
+/**
+  * Created by bhuvana on 11/24/2015.
+  */
+object Queries {
+
+    def main(args: Array[String]) {
+
+      println("WELCOME")
+      setProperty("hadoop.home.dir", "c:\\winutil\\")
+
+      val conf = new SparkConf().setAppName("SparkSQL").setMaster("local").set("com.spark.executor", "")
+
+      val sc = new SparkContext(conf)
+
+      val sqlContext = new SQLContext(sc)
+
+      // loading the tweetfile
+
+      val jsonFile = sqlContext.jsonFile("src/main/resources/tweets.json")
+
+      // registering the tweets file into table
+
+      jsonFile.registerTempTable("MainTable")
+
+      //retrieving language count from our tweets
+
+      val lang=sqlContext.sql("SELECT lang,count(*) as lang_count from MainTable GROUP BY lang ORDER BY lang_count DESC LIMIT 10")
+
+      // mapping results into single file
+
+      lang.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing")
+
+      // refining our search by filtering only english language tweets
+
+      val lang_refiner=sqlContext.sql("SELECT * FROM MainTable where lang='en'")
+
+      lang_refiner.registerTempTable("Lang_Refiner")
+
+      // retrieving tweets whose time zone is not null
+
+      val table=sqlContext.sql("SELECT * from Lang_Refiner where user.time_zone IS NOT NULL")
+
+      table.registerTempTable("Tr")
+
+      //getting the timezones from where more tweets are tweeted
+
+      val timezone = sqlContext.sql("SELECT user.time_zone, count(*) AS location_count FROM Tr GROUP BY user.time_zone ORDER BY location_count DESC LIMIT 10")
+
+      timezone.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing1")
+
+      //getting the time at which we have more tweets
+
+      val created =sqlContext.sql("SELECT created_at, count(*) AS tc FROM Lang_Refiner GROUP BY created_at ORDER BY created_at")
+
+      created.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing2")
+
+      //retreving hashtags text from Lang_Refiner table
+
+      val table2=sqlContext.sql("SELECT entities.hashtags.text as ht from Lang_Refiner where entities.hashtags.text IS NOT NULL")
+
+      table2.registerTempTable("Table2")
+
+      //getting data from Table2 to slpit file in to words
+
+      val table21=sqlContext.sql("SELECT ht from Table2").map(l => l.getList(0))
+
+      //converting to single array
+
+      val htd = table21.filter(l => l.size() > 0).flatMap(tags => {
+        tags.toArray
+      })
+
+      //saving the results
+
+      htd.saveAsTextFile("out1")
+
+      // retreving the saved esult file
+
+      val htd1=sc.textFile("out1")
+
+      val schemaString = "HashTags"
+
+      //Creating the schema
+
+      val schema =
+        StructType(
+          schemaString.split(" ").map(fieldName => StructField(fieldName, StringType, true)))
+
+      //Converting RDD into row format to create table
+
+      val rowRDD = htd1.map(r=> r.split(",") ).map(l => Row(l(0)))
+
+      //Creating data frame with RDD and created schema
+
+      val hashTagDataFrame = sqlContext.createDataFrame(rowRDD, schema)
+
+      // Creating table from data frame created
+
+      hashTagDataFrame.registerTempTable("Table21")
+
+      //retreving the most frequent hashtags
+
+      val Hash_Tags=sqlContext.sql("SELECT HashTags,count(*) as ht_count from Table21 GROUP BY HashTags ORDER BY ht_count DESC LIMIT 15")
+
+      Hash_Tags.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing3")
+
+      //getting the most popular users
+
+      val NUMTWEETS = sqlContext.sql("select user.screen_name as u_sn,count(*) as u_count from Lang_Refiner GROUP BY user.screen_name ORDER BY u_count DESC LIMIT 10")
+
+      NUMTWEETS.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing4")
+
+      NUMTWEETS.registerTempTable("NT")
+
+      //getting the users with highest followers
+
+      val FOLLOWERC=sqlContext.sql("SELECT user.followers_count as ft,user.screen_name as ust,count(*) as f_count from Lang_Refiner GROUP BY user.followers_count,user.screen_name ORDER BY f_count DESC LIMIT 10")
+
+      FOLLOWERC.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing5")
+
+      FOLLOWERC.registerTempTable("FC")
+
+      //joining the two tables to get popular users with highest followers count
+
+      val join= sqlContext.sql("select NT.u_sn, FC.ft from NT join FC on (NT.u_sn = FC.ust) GROUP BY NT.u_sn,FC.ft ORDER BY FC.ft DESC")
+
+      join.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing6")
+
+      //top people we reply to
+
+      val st=sqlContext.sql("SELECT in_reply_to_screen_name, COUNT(*) as total from Lang_Refiner WHERE in_reply_to_screen_name is not null GROUP BY in_reply_to_screen_name ORDER BY total DESC LIMIT 10")
+
+      st.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing7")
+
+      //getting the users whose freinds count is highest
+
+      val ts=sqlContext.sql("SELECT user.friends_count as rtc,user.screen_name as ust from Lang_Refiner ORDER BY user.friends_count DESC LIMIT 20")
+
+      ts.map(x=> (x(0),x(1))).coalesce(1,true).saveAsTextFile("src/main/resources/Testing8")
+
+
+    }
+}
